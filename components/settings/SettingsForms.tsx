@@ -10,10 +10,12 @@ import { Input, Textarea, Label, FieldHint } from '@/components/ui/field'
 export function SettingsForms({
   displayName,
   bio,
+  avatarUrl,
   email,
 }: {
   displayName: string
   bio: string
+  avatarUrl: string
   email: string
 }) {
   const [pending, startTransition] = useTransition()
@@ -39,6 +41,17 @@ export function SettingsForms({
           <Input id="display_name" name="display_name" required defaultValue={displayName} />
         </div>
         <div>
+          <Label htmlFor="avatar_url">Avatar URL</Label>
+          <Input
+            id="avatar_url"
+            name="avatar_url"
+            type="url"
+            placeholder="https://…"
+            defaultValue={avatarUrl}
+          />
+          <FieldHint>Link to an image. Leave blank to show your initials instead.</FieldHint>
+        </div>
+        <div>
           <Label htmlFor="bio">Mini bio</Label>
           <Textarea id="bio" name="bio" maxLength={500} defaultValue={bio} />
           <FieldHint>Up to 500 characters. Shown to the rest of the team.</FieldHint>
@@ -48,7 +61,10 @@ export function SettingsForms({
         </Button>
       </form>
 
-      <form onSubmit={submit(updateEmail, 'Check your new inbox to confirm the change.')} className="space-y-4">
+      <form
+        onSubmit={submit(updateEmail, 'Check your new inbox to confirm the change.')}
+        className="space-y-4"
+      >
         <h2 className="text-base font-semibold">Email</h2>
         <div>
           <Label htmlFor="email">Email address</Label>

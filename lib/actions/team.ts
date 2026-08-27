@@ -3,10 +3,27 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin-client'
-import { getCurrentProfile, type TeamRole } from '@/lib/supabase/cached-server'
+import { getCurrentProfile, type TeamRole, type SharedProfile } from '@/lib/supabase/cached-server'
+import { slugify } from '@/lib/utils'
 import type { ActionResult } from './profile'
 
-const ROLES: TeamRole[] = ['owner', 'admin', 'coach', 'volunteer']
+const ROLES: TeamRole[] = ['owner', 'member']
+
+/** Active owner. Backs the four owner-only controls (role, active, remove, lead). */
+function isActiveOwner(profile: SharedProfile | null): profile is SharedProfile {
+  return Boolean(profile?.is_active && profile.role === 'owner')
+}
+
+/** Active owner OR admin. Backs invite management and community assignment. */
+function isActiveManager(profile: SharedProfile | null): profile is SharedProfile {
+  return Boolean(profile?.is_active && (profile.role === 'owner' || profile.is_admin))
+}
+
+/** Empty-string form value → NULL (used for the optional community pickers). */
+function nullableId(formData: FormData, key: string): string | null {
+  const raw = String(formData.get(key) ?? '').trim()
+  return raw === '' ? null : raw
+}
 
 /**
  * Where an invite link lands. Kept in one place because the value has to match
@@ -20,32 +37,36 @@ function inviteRedirectTo() {
 
 /**
  * Invite flow. Two moves, order load-bearing:
- *  1. Insert the team_invites row AS THE SIGNED-IN OWNER (RLS-checked).
+ *  1. Insert the team_invites row AS THE SIGNED-IN MANAGER (RLS-checked).
  *  2. auth.admin.inviteUserByEmail — service role, creates the auth user in an
  *     invited state and sends the email. The signup-gate trigger on auth.users
  *     checks for the invite row, so the row MUST exist first.
  *
- * The owner check here is a courtesy for error messages; the RLS policy on
- * team_invites is what actually refuses a non-owner.
+ * The manager check here is a courtesy for error messages; the RLS policy on
+ * team_invites ("invites managers all") is what actually refuses anyone else.
+ *
+ * Deliberately no is_safeguarding_lead field: an invite should never be the
+ * thing that grants global incident access — that's handed out after arrival,
+ * eyes-open, via setSafeguardingLead (owner-only).
  */
 export async function inviteMember(formData: FormData): Promise<ActionResult> {
   const profile = await getCurrentProfile()
-  if (!profile || profile.role !== 'owner') {
-    return { ok: false, error: 'Only an owner can invite members.' }
+  if (!isActiveManager(profile)) {
+    return { ok: false, error: 'Only an owner or admin can invite members.' }
   }
 
   const email = String(formData.get('email') ?? '').trim().toLowerCase()
-  const role = String(formData.get('role') ?? 'volunteer') as TeamRole
+  const role = String(formData.get('role') ?? 'member') as TeamRole
+  const is_admin = formData.get('is_admin') === 'on' || formData.get('is_admin') === 'true'
+  const community_id = nullableId(formData, 'community_id')
+
   if (!email.includes('@')) return { ok: false, error: 'Enter a valid email address.' }
   if (!ROLES.includes(role)) return { ok: false, error: 'Unknown role.' }
-  // Portal authority follows the role for invites: owner/admin arrive with
-  // is_admin, coach/volunteer without. An owner can adjust after acceptance.
-  const is_admin = role === 'owner' || role === 'admin'
 
   const supabase = await createClient()
   const { error: insertError } = await supabase
     .from('team_invites')
-    .insert({ email, role, is_admin, invited_by: profile.id })
+    .insert({ email, role, is_admin, community_id, invited_by: profile.id })
   if (insertError) {
     if (insertError.code === '23505') {
       return {
@@ -89,8 +110,9 @@ export async function inviteMember(formData: FormData): Promise<ActionResult> {
 export type InviteLinkResult = { ok: true; url: string } | { ok: false; error: string }
 
 /**
- * Mint a one-time sign-in link for an invited address, for the owner to send by
- * hand — WhatsApp, Signal, read out over the phone, whatever works.
+ * Mint a one-time sign-in link for an invited or existing address, for an
+ * owner/admin to send by hand — WhatsApp, Signal, read out over the phone,
+ * whatever works.
  *
  * This exists because Supabase Auth's own email is the single point of failure
  * in the invite flow: if the project's SMTP is unconfigured, rate-limited, or
@@ -115,15 +137,15 @@ export type InviteLinkResult = { ok: true; url: string } | { ok: false; error: s
  */
 export async function createInviteLink(formData: FormData): Promise<InviteLinkResult> {
   const profile = await getCurrentProfile()
-  if (!profile || profile.role !== 'owner') {
-    return { ok: false, error: 'Only an owner can create invite links.' }
+  if (!isActiveManager(profile)) {
+    return { ok: false, error: 'Only an owner or admin can create invite links.' }
   }
 
   const email = String(formData.get('email') ?? '').trim().toLowerCase()
   if (!email.includes('@')) return { ok: false, error: 'Enter a valid email address.' }
 
-  // Read through the user's own client so RLS confirms the owner may see this
-  // address at all, rather than trusting the id that arrived from the browser.
+  // Read through the user's own client so RLS confirms the caller may see this
+  // address at all, rather than trusting whatever arrived from the browser.
   //
   // eq, not ilike: LIKE patterns treat `_` and `%` as wildcards, and `_` is
   // legal in an email local-part — so `ilike` would let a request for
@@ -170,13 +192,10 @@ export async function createInviteLink(formData: FormData): Promise<InviteLinkRe
   // Never hand out the raw GoTrue /verify URL. Supabase consumes the one-time
   // token on GET, and every chat app — WhatsApp, Slack, iMessage, Signal —
   // fetches a pasted URL to build a link preview. That crawler burns the token
-  // seconds after you paste, so the recipient clicks a dead link. Confirmed in
-  // production 2026-08-18: three invites were consumed 4–6s after generation
-  // by a preview fetch, and all three people were locked out.
-  //
-  // So we stash the real link server-side and hand out a pointer to an
-  // interstitial. A crawler GETting /join renders a button and consumes
-  // nothing; only a human POSTing that form redeems the token.
+  // seconds after you paste, so the recipient clicks a dead link. So we stash
+  // the real link server-side and hand out a pointer to an interstitial: a
+  // crawler GETting /join renders a button and consumes nothing; only a human
+  // POSTing that form redeems the token.
   const { data: handoff, error: handoffError } = await admin
     .from('invite_link_handoffs')
     .insert({ email, action_link: actionLink, created_by: profile.id })
@@ -200,6 +219,11 @@ export async function createInviteLink(formData: FormData): Promise<InviteLinkRe
 }
 
 export async function revokeInvite(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveManager(profile)) {
+    return { ok: false, error: 'Only an owner or admin can revoke invites.' }
+  }
+
   const id = String(formData.get('id') ?? '')
   const supabase = await createClient()
   const { error } = await supabase
@@ -213,15 +237,18 @@ export async function revokeInvite(formData: FormData): Promise<ActionResult> {
 }
 
 /**
- * Role/active/remove all go through SECURITY DEFINER RPCs — the owner check,
- * the self-change guards and the delete itself are enforced in the database,
- * not in this file.
+ * Role + portal-admin flag together, matching admin_set_member_role's
+ * signature — the RPC always wants both, so a role-only change resubmits the
+ * member's current is_admin and vice versa.
  */
 export async function setMemberRole(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveOwner(profile)) return { ok: false, error: 'Only an owner can change roles.' }
+
   const target = String(formData.get('id') ?? '')
   const role = String(formData.get('role') ?? '') as TeamRole
   if (!ROLES.includes(role)) return { ok: false, error: 'Unknown role.' }
-  const is_admin = role === 'owner' || role === 'admin'
+  const is_admin = String(formData.get('is_admin')) === 'true'
 
   const supabase = await createClient()
   const { error } = await supabase.rpc('admin_set_member_role', {
@@ -235,6 +262,11 @@ export async function setMemberRole(formData: FormData): Promise<ActionResult> {
 }
 
 export async function setMemberActive(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveOwner(profile)) {
+    return { ok: false, error: 'Only an owner can activate or deactivate members.' }
+  }
+
   const target = String(formData.get('id') ?? '')
   const active = String(formData.get('active')) === 'true'
   const supabase = await createClient()
@@ -245,9 +277,121 @@ export async function setMemberActive(formData: FormData): Promise<ActionResult>
 }
 
 export async function removeMember(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveOwner(profile)) return { ok: false, error: 'Only an owner can remove members.' }
+
   const target = String(formData.get('id') ?? '')
   const supabase = await createClient()
   const { error } = await supabase.rpc('admin_remove_member', { target })
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/team')
+  return { ok: true }
+}
+
+/**
+ * Community affiliation gates incident visibility, but re-tagging a member is
+ * routine org admin (new member lands in the wrong community, someone moves
+ * city) — owner OR admin, unlike role/active/remove.
+ */
+export async function setMemberCommunity(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveManager(profile)) {
+    return { ok: false, error: "Only an owner or admin can set a member's community." }
+  }
+
+  const target = String(formData.get('id') ?? '')
+  const community = nullableId(formData, 'community_id')
+  const supabase = await createClient()
+  const { error } = await supabase.rpc('admin_set_member_community', { target, community })
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/team')
+  return { ok: true }
+}
+
+/**
+ * Owner-only. Unlike the other owner-only controls this one is NOT disabled
+ * for self-targeting in the UI — admin_set_safeguarding_lead() itself doesn't
+ * refuse it, because an owner already passes every incident policy anyway, so
+ * toggling their own lead flag changes nothing they can reach.
+ */
+export async function setSafeguardingLead(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveOwner(profile)) {
+    return { ok: false, error: 'Only an owner can change safeguarding-lead status.' }
+  }
+
+  const target = String(formData.get('id') ?? '')
+  const value = String(formData.get('value')) === 'true'
+  const supabase = await createClient()
+  const { error } = await supabase.rpc('admin_set_safeguarding_lead', { target, value })
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/team')
+  return { ok: true }
+}
+
+// ── Communities ──────────────────────────────────────────────────────────
+// Plain table writes, not RPCs — RLS ("communities admin insert"/"communities
+// admin update", both owner OR admin) is the actual enforcement. These checks
+// are the same courtesy the invite actions above give: a friendly error
+// instead of a raw Postgres one.
+
+export async function createCommunity(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveManager(profile)) {
+    return { ok: false, error: 'Only an owner or admin can add communities.' }
+  }
+
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return { ok: false, error: 'Name is required.' }
+  if (name.length > 200) return { ok: false, error: 'Name is capped at 200 characters.' }
+  const slug = slugify(name)
+  if (!slug) return { ok: false, error: 'That name has no usable characters for a slug.' }
+
+  const supabase = await createClient()
+  const { error } = await supabase.from('communities').insert({ name, slug })
+  if (error) {
+    if (error.code === '23505') {
+      return {
+        ok: false,
+        error: 'A community with that name (or slug) already exists.',
+      }
+    }
+    return { ok: false, error: error.message }
+  }
+  revalidatePath('/team')
+  return { ok: true }
+}
+
+export async function renameCommunity(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveManager(profile)) {
+    return { ok: false, error: 'Only an owner or admin can rename communities.' }
+  }
+
+  const id = String(formData.get('id') ?? '')
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return { ok: false, error: 'Name is required.' }
+  if (name.length > 200) return { ok: false, error: 'Name is capped at 200 characters.' }
+
+  const supabase = await createClient()
+  // Slug is left untouched on rename — it may already be referenced elsewhere,
+  // and only the name is what the task asked to make editable.
+  const { error } = await supabase.from('communities').update({ name }).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/team')
+  return { ok: true }
+}
+
+export async function setCommunityActive(formData: FormData): Promise<ActionResult> {
+  const profile = await getCurrentProfile()
+  if (!isActiveManager(profile)) {
+    return { ok: false, error: 'Only an owner or admin can deactivate or reactivate a community.' }
+  }
+
+  const id = String(formData.get('id') ?? '')
+  const active = String(formData.get('active')) === 'true'
+  const supabase = await createClient()
+  const { error } = await supabase.from('communities').update({ is_active: active }).eq('id', id)
   if (error) return { ok: false, error: error.message }
   revalidatePath('/team')
   return { ok: true }
