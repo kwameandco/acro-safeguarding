@@ -3,7 +3,8 @@ import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const REASONS: Record<string, string> = {
-  config: 'The portal is not configured to reach Supabase. This is a deploy problem, not a you problem.',
+  config:
+    'The portal is not connected to its database. While the hub is still being set up this is the expected state — if it was working before, tell an admin.',
   missing_code: 'That sign-in link was incomplete. Request a fresh one.',
   exchange_failed: 'That sign-in link has expired or was already used. Request a fresh one.',
   fallback: 'Something went wrong signing you in.',

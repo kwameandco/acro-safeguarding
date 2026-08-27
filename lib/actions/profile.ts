@@ -9,7 +9,8 @@ export type ActionResult = { ok: true } | { ok: false; error: string }
 /**
  * Self-service profile edit. Runs as the signed-in member, so RLS and the
  * column grant (display_name, avatar_url, bio) decide what is writable —
- * role/is_admin are not in the grant and cannot be smuggled through here.
+ * role/is_admin/is_safeguarding_lead/community_id are not in the grant and
+ * cannot be smuggled through here.
  */
 export async function updateProfile(formData: FormData): Promise<ActionResult> {
   const user = await getCurrentUser()
@@ -17,13 +18,17 @@ export async function updateProfile(formData: FormData): Promise<ActionResult> {
 
   const display_name = String(formData.get('display_name') ?? '').trim()
   const bio = String(formData.get('bio') ?? '').trim()
+  const avatar_url = String(formData.get('avatar_url') ?? '').trim()
   if (!display_name) return { ok: false, error: 'Display name is required.' }
   if (bio.length > 500) return { ok: false, error: 'Bio is capped at 500 characters.' }
+  if (avatar_url.length > 2000) {
+    return { ok: false, error: 'Avatar URL is capped at 2000 characters.' }
+  }
 
   const supabase = await createClient()
   const { error } = await supabase
     .from('profiles')
-    .update({ display_name, bio: bio || null })
+    .update({ display_name, bio: bio || null, avatar_url: avatar_url || null })
     .eq('id', user.id)
 
   if (error) return { ok: false, error: error.message }

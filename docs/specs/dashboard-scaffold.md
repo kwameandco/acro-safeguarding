@@ -1,6 +1,6 @@
 # Spec: safeguarding-hub feature modules (7-agent fan-out)
 
-**Status:** in progress · **Branch:** `claude/acro-safeguarding-dashboard-69j8v1`
+**Status:** done · **Branch:** `claude/acro-safeguarding-dashboard-69j8v1`
 **Foundation commit:** see `git log` — schema, auth, shell, ui primitives are DONE and
 committed. Agents build the surfaces on top. This file is the single source of truth
 for the fan-out; each agent owns a disjoint file set and must not touch another

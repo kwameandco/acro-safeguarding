@@ -1,7 +1,7 @@
 # Task: safeguarding-dashboard-scaffold
 
 **Branch:** `claude/acro-safeguarding-dashboard-69j8v1`
-**Status:** in progress
+**Status:** done
 **Spec:** `docs/specs/dashboard-scaffold.md`
 
 ## Goal
@@ -33,13 +33,29 @@ later).
 
 ## State
 
-- Foundation (schema ×9 migrations, auth/invites, shell, guard, docs): committed.
-- Feature modules: 7-agent fan-out per spec — in progress.
-- Gates: `npm run lint` + `npx tsc --noEmit` + `npm run build` (exit-code-checked)
-  before push.
+- Foundation (schema ×9 migrations, auth/invites, shell, guard, docs): commit
+  `f38a2d8`.
+- Feature modules (board, calendar, resources, announcements, incidents,
+  dashboard feed, team+settings rework): built via 7-agent fan-out per spec,
+  integrated in the follow-up commit on this branch.
+- Gates at integration: `npm run lint` exit 0 · `npx tsc --noEmit` exit 0 ·
+  `npm run build` exit 0 (exit codes captured to files, not inferred from
+  piped output). House-rule sweeps (middleware.ts, internal `<a href>`,
+  sub-12px fonts, dangerouslySetInnerHTML, bare Record-index JSX, SLAC
+  leftovers): all clean.
+- Cannot be sample-tested end-to-end from this environment: **no Supabase
+  project exists**, so DB round-trips, RLS probes and storage upload are
+  untestable until connect-up. Correctness is by construction against the
+  migration schemas + the three gates. This gap is explicit per the
+  confirm-applied rule.
+
+**Status update:** done (branch complete, unmerged).
 
 ## Next safe step
 
-Integrate agent output, run gates, push branch. Then (separate sessions, once K
-creates the Supabase project): apply migrations per `docs/SUPABASE_SETUP.md`,
-first-owner bootstrap, Netlify site.
+K: review + merge the PR for this branch. Then, in a migration-capable session
+once the Supabase project is created: `docs/SUPABASE_SETUP.md` end to end
+(apply ×9 migrations with per-file verify blocks, first-owner bootstrap, auth
+settings, storage check), then a real-device pass on the deployed portal.
+Future feature session: the public anonymous `/report` route (schema is ready;
+needs its own rate-limited SECURITY DEFINER RPC migration).

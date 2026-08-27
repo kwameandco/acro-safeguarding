@@ -5,16 +5,27 @@ import { toast } from 'sonner'
 import {
   createInviteLink,
   inviteMember,
-  revokeInvite,
-  setMemberRole,
-  setMemberActive,
   removeMember,
+  revokeInvite,
+  setMemberActive,
+  setMemberCommunity,
+  setMemberRole,
+  setSafeguardingLead,
 } from '@/lib/actions/team'
 import type { ActionResult } from '@/lib/actions/profile'
+import type { TeamRole } from '@/lib/supabase/cached-server'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Badge } from '@/components/ui/field'
 
-const ROLES = ['owner', 'admin', 'coach', 'volunteer'] as const
+const ROLES: TeamRole[] = ['owner', 'member']
+
+/** `ROLES` is the source of truth for this map — widen both together. */
+const ROLE_LABEL: Record<TeamRole, string> = {
+  owner: 'Owner',
+  member: 'Member',
+}
+
+export type CommunityOption = { id: string; name: string; is_active: boolean }
 
 function useAction() {
   const [pending, startTransition] = useTransition()
@@ -34,14 +45,42 @@ function useAction() {
   return { pending, run }
 }
 
-export function InviteForm() {
+/**
+ * Shared options list for every community picker. Active communities are
+ * always selectable. A currently-assigned-but-now-inactive community is
+ * still rendered (disabled, marked "(inactive)") so the control keeps
+ * showing the true current value instead of silently looking unset.
+ */
+function CommunityOptions({
+  communities,
+  currentId,
+}: {
+  communities: CommunityOption[]
+  currentId?: string | null
+}) {
+  return (
+    <>
+      <option value="">No community</option>
+      {communities
+        .filter((c) => c.is_active || c.id === currentId)
+        .map((c) => (
+          <option key={c.id} value={c.id} disabled={!c.is_active}>
+            {c.name}
+            {c.is_active ? '' : ' (inactive)'}
+          </option>
+        ))}
+    </>
+  )
+}
+
+export function InviteForm({ communities }: { communities: CommunityOption[] }) {
   const { pending, run } = useAction()
   const formRef = useRef<HTMLFormElement>(null)
 
   return (
     <form
       ref={formRef}
-      className="flex max-w-xl flex-wrap items-end gap-3"
+      className="flex max-w-2xl flex-wrap items-end gap-3"
       onSubmit={(e) => {
         e.preventDefault()
         run(inviteMember, new FormData(e.currentTarget), 'Invite sent.', () =>
@@ -59,14 +98,31 @@ export function InviteForm() {
         <label htmlFor="invite-role" className="mb-1.5 block font-medium">
           Role
         </label>
-        <Select id="invite-role" name="role" defaultValue="volunteer">
+        <Select id="invite-role" name="role" defaultValue="member">
           {ROLES.map((r) => (
             <option key={r} value={r}>
-              {r}
+              {ROLE_LABEL[r] ?? r}
             </option>
           ))}
         </Select>
       </div>
+      <div>
+        <label htmlFor="invite-community" className="mb-1.5 block font-medium">
+          Community
+        </label>
+        <Select id="invite-community" name="community_id" defaultValue="">
+          <CommunityOptions communities={communities} />
+        </Select>
+      </div>
+      <label htmlFor="invite-is-admin" className="flex items-center gap-2 pb-2.5 font-medium">
+        <input
+          id="invite-is-admin"
+          type="checkbox"
+          name="is_admin"
+          className="size-4 rounded border-input"
+        />
+        Admin
+      </label>
       <Button type="submit" size="default" disabled={pending}>
         {pending ? 'Sending…' : 'Send invite'}
       </Button>
@@ -75,15 +131,22 @@ export function InviteForm() {
 }
 
 /**
- * Manual delivery path for an invite. Generates the same one-time link the
- * email would have carried and puts it on the clipboard, so a member who never
- * received the mail can still be let in.
+ * Manual delivery path for an invite (or a sign-in link for an existing
+ * member). Generates the same one-time link the email would have carried and
+ * puts it on the clipboard, so someone who never received the mail can still
+ * get in.
  *
  * The URL is also rendered in a readonly input: clipboard access is refused
- * outright in some browsers and over plain HTTP, and a link the owner can see
+ * outright in some browsers and over plain HTTP, and a link the caller can see
  * and select by hand is the difference between a workaround and a dead end.
  */
-export function InviteLinkButton({ email, label = 'Copy invite link' }: { email: string; label?: string }) {
+export function InviteLinkButton({
+  email,
+  label = 'Copy invite link',
+}: {
+  email: string
+  label?: string
+}) {
   const [pending, startTransition] = useTransition()
   const [url, setUrl] = useState<string | null>(null)
 
@@ -148,23 +211,34 @@ export function RevokeInviteButton({ id }: { id: string }) {
   )
 }
 
-type Member = {
+export type Member = {
   id: string
   email: string | null
   display_name: string | null
-  role: string
+  role: TeamRole
   is_admin: boolean
+  is_safeguarding_lead: boolean
   is_active: boolean
+  community_id: string | null
 }
 
 export function MemberRow({
   member,
   isSelf,
-  hasSignedIn = true,
+  viewerIsOwner,
+  communities,
 }: {
   member: Member
   isSelf: boolean
-  hasSignedIn?: boolean
+  /**
+   * Whoever is looking at this page is already an owner or admin (that's the
+   * page-level gate) — this only distinguishes the owner-only controls
+   * (role, admin flag, lead flag, active state, remove) from the ones an
+   * admin may also use (community, sign-in link). The database re-checks
+   * every one of these regardless of what's rendered here.
+   */
+  viewerIsOwner: boolean
+  communities: CommunityOption[]
 }) {
   const { pending, run } = useAction()
 
@@ -184,70 +258,126 @@ export function MemberRow({
         </p>
         <p className="truncate text-xs text-muted-foreground">{member.email}</p>
       </div>
+
+      <Badge tone={member.role === 'owner' ? 'blue' : 'neutral'}>
+        {ROLE_LABEL[member.role] ?? member.role}
+      </Badge>
+      {member.is_admin && <Badge tone="green">Admin</Badge>}
+      {member.is_safeguarding_lead && <Badge tone="amber">Lead</Badge>}
+      <Badge tone="neutral">
+        {communities.find((c) => c.id === member.community_id)?.name ?? 'No community'}
+      </Badge>
       {!member.is_active && <Badge tone="red">deactivated</Badge>}
-      {/* An account that exists but has never been signed into is the exact
-          shape of a dropped invite email — surface it, and offer the link. */}
-      {hasSignedIn === false && <Badge tone="amber">never signed in</Badge>}
+
       <div className="ml-auto flex flex-wrap items-center gap-2">
-        {/* Offered for every member, not just never-signed-in ones. Gating on
-            sign-in state was wrong: a consumed link sets last_sign_in_at even
-            when the person never got in (a preview crawler redeeming it does
-            exactly that), which hid the re-send button from precisely the
-            people who needed it. An owner can already re-role, deactivate and
-            delete any account, so issuing a sign-in link is no new authority. */}
         {!isSelf && member.email && (
-          <InviteLinkButton
-            email={member.email}
-            label={hasSignedIn ? 'Copy sign-in link' : 'Copy invite link'}
-          />
+          <InviteLinkButton email={member.email} label="Copy sign-in link" />
         )}
+
+        {/* Community assignment: owner OR admin — anyone who can reach this page. */}
         <Select
-          aria-label={`Role for ${member.display_name ?? member.email}`}
+          aria-label={`Community for ${member.display_name ?? member.email}`}
           className="h-8 w-auto text-xs"
-          value={member.role}
-          disabled={isSelf || pending}
+          value={member.community_id ?? ''}
+          disabled={pending}
           onChange={(e) =>
-            run(setMemberRole, withId({ role: e.target.value }), 'Role updated.')
+            run(
+              setMemberCommunity,
+              withId({ community_id: e.target.value }),
+              'Community updated.'
+            )
           }
         >
-          {ROLES.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
+          <CommunityOptions communities={communities} currentId={member.community_id} />
         </Select>
-        {!isSelf && (
+
+        {viewerIsOwner && (
           <>
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={pending}
-              onClick={() =>
+            <Select
+              aria-label={`Role for ${member.display_name ?? member.email}`}
+              className="h-8 w-auto text-xs"
+              value={member.role}
+              disabled={isSelf || pending}
+              onChange={(e) =>
                 run(
-                  setMemberActive,
-                  withId({ active: String(!member.is_active) }),
-                  member.is_active ? 'Member deactivated.' : 'Member reactivated.'
+                  setMemberRole,
+                  withId({ role: e.target.value, is_admin: String(member.is_admin) }),
+                  'Role updated.'
                 )
               }
             >
-              {member.is_active ? 'Deactivate' : 'Reactivate'}
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {ROLE_LABEL[r] ?? r}
+                </option>
+              ))}
+            </Select>
+            <Button
+              size="xs"
+              variant={member.is_admin ? 'default' : 'outline'}
+              aria-pressed={member.is_admin}
+              disabled={isSelf || pending}
+              onClick={() =>
+                run(
+                  setMemberRole,
+                  withId({ role: member.role, is_admin: String(!member.is_admin) }),
+                  member.is_admin ? 'Admin access removed.' : 'Admin access granted.'
+                )
+              }
+            >
+              Admin
             </Button>
             <Button
               size="xs"
-              variant="destructive"
+              variant={member.is_safeguarding_lead ? 'default' : 'outline'}
+              aria-pressed={member.is_safeguarding_lead}
               disabled={pending}
-              onClick={() => {
-                if (
-                  window.confirm(
-                    `Remove ${member.display_name ?? member.email} entirely? This deletes their account. Deactivating is usually the better choice.`
-                  )
-                ) {
-                  run(removeMember, withId({}), 'Member removed.')
-                }
-              }}
+              onClick={() =>
+                run(
+                  setSafeguardingLead,
+                  withId({ value: String(!member.is_safeguarding_lead) }),
+                  member.is_safeguarding_lead
+                    ? 'Safeguarding-lead access removed.'
+                    : 'Safeguarding-lead access granted.'
+                )
+              }
             >
-              Remove
+              Lead
             </Button>
+            {!isSelf && (
+              <>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() =>
+                    run(
+                      setMemberActive,
+                      withId({ active: String(!member.is_active) }),
+                      member.is_active ? 'Member deactivated.' : 'Member reactivated.'
+                    )
+                  }
+                >
+                  {member.is_active ? 'Deactivate' : 'Reactivate'}
+                </Button>
+                <Button
+                  size="xs"
+                  variant="destructive"
+                  disabled={pending}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Remove ${member.display_name ?? member.email} entirely? This deletes their account. Deactivating is usually the better choice.`
+                      )
+                    ) {
+                      run(removeMember, withId({}), 'Member removed.')
+                    }
+                  }}
+                >
+                  Remove
+                </Button>
+              </>
+            )}
           </>
         )}
       </div>
