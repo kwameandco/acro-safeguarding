@@ -4,6 +4,16 @@ Entry point. Keep it short: **this file = orientation**, `docs/` = the detail.
 
 ---
 
+## Active task
+
+**`docs/tasks/supabase-connect-up.md`** — the app is fully built (all six portal
+surfaces + auth) and merged to `main`, but there is still no live Supabase project.
+That task file is the next session's starting point. Read it, then
+`docs/SUPABASE_SETUP.md` for the actual runbook. Don't start a new feature area
+before this one is either picked up deliberately or explicitly deferred.
+
+---
+
 ## What this is
 
 A private portal for the **cross-community acro safeguarding team** — collaboration,

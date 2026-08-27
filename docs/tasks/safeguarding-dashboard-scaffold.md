@@ -49,13 +49,9 @@ later).
   migration schemas + the three gates. This gap is explicit per the
   confirm-applied rule.
 
-**Status update:** done (branch complete, unmerged).
+**Status update:** done, merged to `main`.
 
 ## Next safe step
 
-K: review + merge the PR for this branch. Then, in a migration-capable session
-once the Supabase project is created: `docs/SUPABASE_SETUP.md` end to end
-(apply ×9 migrations with per-file verify blocks, first-owner bootstrap, auth
-settings, storage check), then a real-device pass on the deployed portal.
-Future feature session: the public anonymous `/report` route (schema is ready;
-needs its own rate-limited SECURITY DEFINER RPC migration).
+See `docs/tasks/supabase-connect-up.md` — the app has no live database yet. That
+is the next task, not this one; do not reopen this file for it.
