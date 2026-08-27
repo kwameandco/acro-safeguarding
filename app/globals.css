@@ -1,0 +1,140 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Token architecture is deliberately identical to AcroPassport's — same names,
+ * same `@theme inline` → `:root` / `.dark` two-layer shape — so shadcn
+ * components and any ported AP component drop in without rewiring.
+ *
+ * The VALUES are not AP's. AP's palette (forest green + gold + warm white) is
+ * its passport-document identity and means nothing here. These are neutral
+ * placeholders pending real SLAC brand colours; changing them should be a
+ * one-file edit, which is the point of routing everything through tokens.
+ *
+ * Every token MUST be defined in both :root and .dark. A colour that exists in
+ * only one of them is a dark-mode bug waiting to ship.
+ */
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --color-background:             var(--background);
+  --color-foreground:             var(--foreground);
+  --color-card:                   var(--card);
+  --color-card-foreground:        var(--card-foreground);
+  --color-popover:                var(--popover);
+  --color-popover-foreground:     var(--popover-foreground);
+  --color-primary:                var(--primary);
+  --color-primary-foreground:     var(--primary-foreground);
+  --color-secondary:              var(--secondary);
+  --color-secondary-foreground:   var(--secondary-foreground);
+  --color-muted:                  var(--muted);
+  --color-muted-foreground:       var(--muted-foreground);
+  --color-accent:                 var(--accent);
+  --color-accent-foreground:      var(--accent-foreground);
+  --color-destructive:            var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success:                var(--success);
+  --color-success-foreground:     var(--success-foreground);
+  --color-warning:                var(--warning);
+  --color-warning-foreground:     var(--warning-foreground);
+  --color-border:                 var(--border);
+  --color-input:                  var(--input);
+  --color-ring:                   var(--ring);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: calc(var(--radius) - 1px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 2px);
+}
+
+:root {
+  color-scheme: light;
+  --radius: 6px;
+
+  --background:             oklch(0.99 0 0);
+  --foreground:             oklch(0.16 0 0);
+  --card:                   oklch(1 0 0);
+  --card-foreground:        oklch(0.16 0 0);
+  --popover:                oklch(1 0 0);
+  --popover-foreground:     oklch(0.16 0 0);
+
+  --primary:                oklch(0.35 0.10 185);
+  --primary-foreground:     oklch(0.98 0 0);
+
+  --secondary:              oklch(0.96 0.003 250);
+  --secondary-foreground:   oklch(0.28 0 0);
+
+  --muted:                  oklch(0.955 0.003 250);
+  --muted-foreground:       oklch(0.50 0.008 250);
+
+  --accent:                 oklch(0.94 0.02 250);
+  --accent-foreground:      oklch(0.26 0.02 250);
+
+  --destructive:            oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --success:                oklch(0.55 0.13 150);
+  --success-foreground:     oklch(0.985 0 0);
+
+  --warning:                oklch(0.72 0.15 75);
+  --warning-foreground:     oklch(0.20 0.03 75);
+
+  --border:                 oklch(0.91 0.004 250);
+  --input:                  oklch(0.91 0.004 250);
+  --ring:                   oklch(0.35 0.10 185);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background:             oklch(0.16 0.004 250);
+  --foreground:             oklch(0.97 0 0);
+  --card:                   oklch(0.20 0.005 250);
+  --card-foreground:        oklch(0.97 0 0);
+  --popover:                oklch(0.20 0.005 250);
+  --popover-foreground:     oklch(0.97 0 0);
+
+  --primary:                oklch(0.72 0.10 185);
+  --primary-foreground:     oklch(0.16 0.02 250);
+
+  --secondary:              oklch(0.26 0.006 250);
+  --secondary-foreground:   oklch(0.97 0 0);
+
+  --muted:                  oklch(0.26 0.006 250);
+  --muted-foreground:       oklch(0.68 0.008 250);
+
+  --accent:                 oklch(0.30 0.015 250);
+  --accent-foreground:      oklch(0.97 0 0);
+
+  --destructive:            oklch(0.65 0.20 25);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --success:                oklch(0.68 0.14 150);
+  --success-foreground:     oklch(0.16 0.02 150);
+
+  --warning:                oklch(0.78 0.14 75);
+  --warning-foreground:     oklch(0.18 0.03 75);
+
+  --border:                 oklch(0.30 0.006 250);
+  --input:                  oklch(0.30 0.006 250);
+  --ring:                   oklch(0.72 0.10 185);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    /* text-sm (14px) is the readable-text baseline, matching AcroPassport.
+       text-xs is for metadata only; nothing goes below it. */
+    font-size: 0.875rem;
+    line-height: 1.5rem;
+    -webkit-font-smoothing: antialiased;
+  }
+}

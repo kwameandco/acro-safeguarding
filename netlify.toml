@@ -1,0 +1,29 @@
+# Netlify config for the Acro Safeguarding Hub.
+#
+# This needs its OWN Netlify site once hosting is decided — the app lives at
+# the REPO ROOT (no base-directory setting needed, unlike SLAC's admin/).
+# Required env vars on the site before the first deploy:
+#   NEXT_PUBLIC_SUPABASE_PROJECT_REF, NEXT_PUBLIC_SUPABASE_URL,
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
+#   NEXT_PUBLIC_SITE_URL
+# Until the Supabase project exists the app builds fine with none of them set
+# and serves the config-error page — safe to deploy, useless to use.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[build.environment]
+  # Pin the Node major. Netlify's default drifts as they roll new images, and a
+  # silent bump is a build that worked yesterday and doesn't today.
+  NODE_VERSION = "22"
+
+  # Public by design (anon key is RLS-gated), but Netlify's secrets scanner
+  # flags any env var echoed into the bundle.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY,NEXT_PUBLIC_SITE_URL,NEXT_PUBLIC_SUPABASE_PROJECT_REF"
+  # AcroPassport's Netlify builds OOM at the default ~2GB V8 ceiling during
+  # `next build`'s TypeScript pass. Set it from the start.
+  NODE_OPTIONS = "--max-old-space-size=6144"
